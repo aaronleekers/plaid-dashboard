@@ -1,65 +1,101 @@
 import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+
+const TELLER_APP_ID = process.env.TELLER_APP_ID || 'token_obmzypk2wucimgxlxijv4axyjm';
+
+interface TellerEnrollment {
+  id: string;
+  url: string;
+  message?: string;
+}
+
+interface TellerFetchResult {
+  ok: boolean;
+  data: unknown;
+  status: number;
+}
+
+function tellerFetch(url: string, options: RequestInit = {}): Promise<TellerFetchResult> {
+  return new Promise((resolve, reject) => {
+    const certPath = path.join(process.cwd(), 'certificate.pem');
+    const keyPath = path.join(process.cwd(), 'private_key.pem');
+    
+    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+      reject(new Error('Teller certificates not found'));
+      return;
+    }
+
+    const urlObj = new URL(url);
+    const reqOptions: https.RequestOptions = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: options.method || 'GET',
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+      headers: {
+        'Authorization': `Bearer ${TELLER_APP_ID}`,
+        'Content-Type': 'application/json',
+      },
+    };
+
+    const req = https.request(reqOptions, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve({ ok: res.statusCode === 200 || res.statusCode === 201, data: JSON.parse(data), status: res.statusCode ?? 0 });
+        } catch {
+          resolve({ ok: false, data, status: res.statusCode ?? 0 });
+        }
+      });
+    });
+
+    req.on('error', reject);
+    
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
 
 export async function POST() {
   try {
-    const appId = process.env.TELLER_APP_ID;
-    const secret = process.env.TELLER_SECRET;
-
-    if (!appId || !secret) {
-      return NextResponse.json({ 
-        error: 'Teller credentials not configured',
-        hint: 'Set TELLER_APP_ID and TELLER_SECRET environment variables'
-      }, { status: 500 });
-    }
-
-    // Create an enrollment to get a connect URL
-    const response = await fetch('https://api.teller.io/enrollments', {
+    // Create enrollment to get connect URL
+    const result = await tellerFetch('https://api.teller.io/enrollments', {
       method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + Buffer.from(`${appId}:${secret}`).toString('base64'),
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({
         enrollment_type: 'bank',
-        return_url: process.env.NEXT_PUBLIC_APP_URL + '/?connected=true',
+        return_url: (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000') + '/?connected=true',
       }),
     });
 
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error('Teller enrollment error:', data);
-      return NextResponse.json({ error: data.message || 'Failed to create enrollment' }, { status: 500 });
+    if (!result.ok) {
+      const errData = result.data as {message?: string} || {};
+      console.error('Teller enrollment error:', result.data);
+      return NextResponse.json({ 
+        error: errData.message || 'Failed to create enrollment',
+        details: result.data 
+      }, { status: 500 });
     }
 
+    const enrollment = result.data as TellerEnrollment;
     return NextResponse.json({ 
-      enrollment_id: data.id,
-      url: data.url 
+      enrollment_id: enrollment.id,
+      url: enrollment.url 
     });
   } catch (error) {
     console.error('Error creating enrollment:', error);
-    return NextResponse.json({ error: 'Failed to connect bank' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to connect bank', details: String(error) }, { status: 500 });
   }
 }
 
 export async function GET() {
   try {
-    const appId = process.env.TELLER_APP_ID;
-    const secret = process.env.TELLER_SECRET;
-
-    if (!appId || !secret) {
-      return NextResponse.json({ error: 'Teller credentials not configured' }, { status: 500 });
-    }
-
-    // Get existing enrollments
-    const response = await fetch('https://api.teller.io/enrollments', {
-      headers: {
-        'Authorization': 'Basic ' + Buffer.from(`${appId}:${secret}`).toString('base64'),
-      },
-    });
-
-    const enrollments = await response.json();
-    return NextResponse.json({ enrollments });
+    const result = await tellerFetch('https://api.teller.io/enrollments');
+    return NextResponse.json({ enrollments: result.data || [] });
   } catch (error) {
     console.error('Error fetching enrollments:', error);
     return NextResponse.json({ error: 'Failed to fetch enrollments' }, { status: 500 });
