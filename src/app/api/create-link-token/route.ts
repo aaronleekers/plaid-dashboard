@@ -1,30 +1,67 @@
-import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } from 'plaid';
 import { NextResponse } from 'next/server';
-
-const configuration = new Configuration({
-  basePath: PlaidEnvironments.sandbox,
-  baseOptions: {
-    headers: {
-      'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID || '667289ef06b3ec0013c09df7',
-      'PLAID-SECRET': process.env.PLAID_SECRET || '0b367a41d20ee3d346e2a6900af4d5',
-    },
-  },
-});
-
-const plaidClient = new PlaidApi(configuration);
 
 export async function POST() {
   try {
-    const response = await plaidClient.linkTokenCreate({
-      user: { client_user_id: 'user-sandbox' },
-      client_name: 'Plaid Dashboard',
-      products: [Products.Transactions, Products.Auth],
-      country_codes: [CountryCode.Us],
-      language: 'en',
+    const appId = process.env.TELLER_APP_ID;
+    const secret = process.env.TELLER_SECRET;
+
+    if (!appId || !secret) {
+      return NextResponse.json({ 
+        error: 'Teller credentials not configured',
+        hint: 'Set TELLER_APP_ID and TELLER_SECRET environment variables'
+      }, { status: 500 });
+    }
+
+    // Create an enrollment to get a connect URL
+    const response = await fetch('https://api.teller.io/enrollments', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${appId}:${secret}`).toString('base64'),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        enrollment_type: 'bank',
+        return_url: process.env.NEXT_PUBLIC_APP_URL + '/?connected=true',
+      }),
     });
-    return NextResponse.json({ link_token: response.data.link_token });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error('Teller enrollment error:', data);
+      return NextResponse.json({ error: data.message || 'Failed to create enrollment' }, { status: 500 });
+    }
+
+    return NextResponse.json({ 
+      enrollment_id: data.id,
+      url: data.url 
+    });
   } catch (error) {
-    console.error('Error creating link token:', error);
-    return NextResponse.json({ error: 'Failed to create link token' }, { status: 500 });
+    console.error('Error creating enrollment:', error);
+    return NextResponse.json({ error: 'Failed to connect bank' }, { status: 500 });
+  }
+}
+
+export async function GET() {
+  try {
+    const appId = process.env.TELLER_APP_ID;
+    const secret = process.env.TELLER_SECRET;
+
+    if (!appId || !secret) {
+      return NextResponse.json({ error: 'Teller credentials not configured' }, { status: 500 });
+    }
+
+    // Get existing enrollments
+    const response = await fetch('https://api.teller.io/enrollments', {
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${appId}:${secret}`).toString('base64'),
+      },
+    });
+
+    const enrollments = await response.json();
+    return NextResponse.json({ enrollments });
+  } catch (error) {
+    console.error('Error fetching enrollments:', error);
+    return NextResponse.json({ error: 'Failed to fetch enrollments' }, { status: 500 });
   }
 }

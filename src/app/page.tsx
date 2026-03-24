@@ -1,128 +1,153 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { usePlaidLink, PlaidLinkOptions, PlaidLinkOnSuccess } from 'react-plaid-link';
 
 interface Account {
-  account_id: string;
+  id: string;
   name: string;
-  official_name: string;
   type: string;
-  subtype: string;
+  currency: string;
   balances: {
-    available: number | null;
-    current: number;
-    iso_currency_code: string;
+    available: string;
+    current: string;
+    limit: string | null;
   };
 }
 
 interface Transaction {
-  transaction_id: string;
-  name: string;
-  merchant_name: string;
+  id: string;
+  account_id: string;
   amount: number;
   date: string;
-  category: string[];
-  pending: boolean;
+  description: string;
+  type: string;
+  status: string;
+  merchant: {
+    name: string;
+  } | null;
 }
 
 export default function Home() {
-  const [linkToken, setLinkToken] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
+  const [connectUrl, setConnectUrl] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [totalBalance, setTotalBalance] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem('plaid_access_token');
-    if (stored) {
-      setAccessToken(stored);
+    const stored = localStorage.getItem('teller_enrollment_id');
+    const storedUrl = localStorage.getItem('teller_connect_url');
+    
+    if (stored && storedUrl) {
+      setEnrollmentId(stored);
+      setConnectUrl(storedUrl);
+      fetchAccounts(stored);
     }
-    fetchLinkToken();
+    
+    // Check if we just connected
+    if (window.location.search.includes('connected=true')) {
+      const stored = localStorage.getItem('teller_enrollment_id');
+      if (stored) {
+        fetchAccounts(stored);
+      }
+    }
   }, []);
 
-  useEffect(() => {
-    if (accessToken) {
-      fetchAccounts(accessToken);
-      fetchTransactions(accessToken);
-    }
-  }, [accessToken]);
-
-  const fetchLinkToken = async () => {
+  const fetchAccounts = async (enrollId: string) => {
     try {
-      const response = await fetch('/api/create-link-token', { method: 'POST' });
-      const data = await response.json();
-      setLinkToken(data.link_token);
-    } catch (error) {
-      console.error('Error fetching link token:', error);
-    }
-  };
-
-  const fetchAccounts = async (token: string) => {
-    try {
+      setLoading(true);
       const response = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: token }),
+        body: JSON.stringify({ enrollment_id: enrollId }),
       });
       const data = await response.json();
+      
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      
       setAccounts(data.accounts || []);
+      
       const total = (data.accounts || []).reduce(
-        (sum: number, acc: Account) => sum + (acc.balances?.current || 0),
+        (sum: number, acc: Account) => sum + parseFloat(acc.balances?.current || '0'),
         0
       );
       setTotalBalance(total);
-    } catch (error) {
-      console.error('Error fetching accounts:', error);
-    }
-  };
-
-  const fetchTransactions = async (token: string) => {
-    try {
-      const response = await fetch('/api/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: token }),
-      });
-      const data = await response.json();
-      setTransactions(data.transactions || []);
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-    }
-  };
-
-  const onSuccess: PlaidLinkOnSuccess = async (public_token) => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/exchange-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ public_token }),
-      });
-      const data = await response.json();
-      if (data.access_token) {
-        localStorage.setItem('plaid_access_token', data.access_token);
-        setAccessToken(data.access_token);
+      
+      // Fetch transactions for first account
+      if (data.accounts && data.accounts.length > 0) {
+        fetchTransactions(data.accounts[0].id);
       }
-    } catch (error) {
-      console.error('Error exchanging token:', error);
+    } catch (err) {
+      console.error('Error fetching accounts:', err);
+      setError('Failed to fetch accounts');
     }
     setLoading(false);
   };
 
-  const config: PlaidLinkOptions = {
-    token: linkToken,
-    onSuccess,
+  const fetchTransactions = async (accountId: string) => {
+    try {
+      const response = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      const data = await response.json();
+      setTransactions(data.transactions || []);
+    } catch (err) {
+      console.error('Error fetching transactions:', err);
+    }
   };
 
-  const { open, ready } = usePlaidLink(config);
+  const connectBank = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('/api/create-link-token', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.error) {
+        setError(data.error);
+        setLoading(false);
+        return;
+      }
+      
+      // Store enrollment info and redirect to Teller connect
+      localStorage.setItem('teller_enrollment_id', data.enrollment_id);
+      localStorage.setItem('teller_connect_url', data.url);
+      setEnrollmentId(data.enrollment_id);
+      setConnectUrl(data.url);
+      
+      // Redirect to Teller connect page
+      window.location.href = data.url;
+    } catch (err) {
+      console.error('Error connecting bank:', err);
+      setError('Failed to connect bank');
+      setLoading(false);
+    }
+  };
 
-  const formatCurrency = (amount: number) => {
+  const disconnect = () => {
+    localStorage.removeItem('teller_enrollment_id');
+    localStorage.removeItem('teller_connect_url');
+    setEnrollmentId(null);
+    setConnectUrl(null);
+    setAccounts([]);
+    setTransactions([]);
+    setTotalBalance(0);
+  };
+
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-    }).format(amount);
+    }).format(num);
   };
 
   const formatDate = (dateStr: string) => {
@@ -132,55 +157,68 @@ export default function Home() {
     });
   };
 
-  const disconnect = () => {
-    localStorage.removeItem('plaid_access_token');
-    setAccessToken(null);
-    setAccounts([]);
-    setTransactions([]);
-    setTotalBalance(0);
-  };
+  const isConfigured = process.env.NEXT_PUBLIC_TELLER_CONFIGURED === 'true';
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
-      <header className="bg-indigo-600 text-white px-4 py-6 pb-20 rounded-b-3xl">
+      <header className="bg-emerald-600 text-white px-4 py-6 pb-20 rounded-b-3xl">
         <div className="max-w-md mx-auto">
           <h1 className="text-xl font-bold mb-1">My Finances</h1>
-          <p className="text-indigo-200 text-sm">Connected with Plaid Sandbox</p>
+          <p className="text-emerald-200 text-sm">
+            {enrollmentId ? 'Connected with Teller' : 'Teller Integration'}
+          </p>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-md mx-auto px-4 -mt-16">
-        {!accessToken ? (
+        {!enrollmentId ? (
           <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
-            <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl">🏦</span>
             </div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">Connect Your Bank</h2>
             <p className="text-gray-500 text-sm mb-6">
-              Use Plaid sandbox to see test data. No real bank connection needed.
+              {isConfigured 
+                ? 'Connect your bank account securely using Teller.'
+                : 'Teller credentials not configured yet.'}
             </p>
-            <button
-              onClick={() => open()}
-              disabled={!ready || loading}
-              className="w-full bg-indigo-600 text-white py-3 px-6 rounded-xl font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? 'Connecting...' : 'Connect Bank Account'}
-            </button>
-            <p className="text-xs text-gray-400 mt-4">
-              Test credentials: user_good / pass_good
-            </p>
+            
+            {error && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">
+                {error}
+                {!isConfigured && (
+                  <p className="mt-2 text-xs">
+                    Need to set TELLER_APP_ID and TELLER_SECRET env vars.
+                  </p>
+                )}
+              </div>
+            )}
+            
+            {isConfigured ? (
+              <button
+                onClick={connectBank}
+                disabled={loading}
+                className="w-full bg-emerald-600 text-white py-3 px-6 rounded-xl font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading ? 'Connecting...' : 'Connect Bank Account'}
+              </button>
+            ) : (
+              <div className="bg-yellow-50 text-yellow-800 px-4 py-3 rounded-lg text-sm">
+                ⚠️ Setup required: Add TELLER_APP_ID and TELLER_SECRET to Vercel environment variables.
+              </div>
+            )}
           </div>
         ) : (
           <>
             {/* Balance Card */}
-            <div className="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-6 text-white mb-6">
-              <p className="text-indigo-200 text-sm mb-1">Total Balance</p>
+            <div className="bg-gradient-to-br from-emerald-600 to-teal-600 rounded-2xl shadow-lg p-6 text-white mb-6">
+              <p className="text-emerald-200 text-sm mb-1">Total Balance</p>
               <p className="text-4xl font-bold mb-4">{formatCurrency(totalBalance)}</p>
               <button
                 onClick={disconnect}
-                className="text-sm text-indigo-200 hover:text-white transition-colors"
+                className="text-sm text-emerald-200 hover:text-white transition-colors"
               >
                 Disconnect Account
               </button>
@@ -192,11 +230,11 @@ export default function Home() {
               <div className="space-y-3">
                 {accounts.map((account) => (
                   <div
-                    key={account.account_id}
+                    key={account.id}
                     className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
                         <span className="text-lg">
                           {account.type === 'depository' ? '🏦' : 
                            account.type === 'credit' ? '💳' : '💰'}
@@ -204,7 +242,7 @@ export default function Home() {
                       </div>
                       <div>
                         <p className="font-medium text-gray-900 text-sm">{account.name}</p>
-                        <p className="text-xs text-gray-500 capitalize">{account.subtype}</p>
+                        <p className="text-xs text-gray-500 capitalize">{account.type}</p>
                       </div>
                     </div>
                     <p className="font-semibold text-gray-900">
@@ -213,15 +251,16 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+              {loading && <p className="text-center text-gray-500 py-4">Loading...</p>}
             </div>
 
             {/* Transactions */}
             <div className="bg-white rounded-2xl shadow-lg p-5">
               <h3 className="font-bold text-gray-900 mb-4">Recent Transactions</h3>
               <div className="space-y-4">
-                {transactions.slice(0, 10).map((tx) => (
+                {transactions.map((tx) => (
                   <div
-                    key={tx.transaction_id}
+                    key={tx.id}
                     className="flex items-center justify-between"
                   >
                     <div className="flex items-center gap-3">
@@ -232,11 +271,11 @@ export default function Home() {
                       </div>
                       <div>
                         <p className="font-medium text-gray-900 text-sm">
-                          {tx.merchant_name || tx.name}
+                          {tx.merchant?.name || tx.description || 'Transaction'}
                         </p>
                         <p className="text-xs text-gray-500">
                           {formatDate(tx.date)}
-                          {tx.pending && (
+                          {tx.status === 'pending' && (
                             <span className="ml-2 text-yellow-600 font-medium">Pending</span>
                           )}
                         </p>
@@ -249,7 +288,7 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              {transactions.length === 0 && (
+              {transactions.length === 0 && !loading && (
                 <p className="text-gray-500 text-center py-8">No transactions found</p>
               )}
             </div>
@@ -260,7 +299,7 @@ export default function Home() {
       {/* Bottom Nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-3">
         <div className="max-w-md mx-auto flex justify-around">
-          <button className="flex flex-col items-center text-indigo-600">
+          <button className="flex flex-col items-center text-emerald-600">
             <span className="text-xl mb-1">🏠</span>
             <span className="text-xs font-medium">Home</span>
           </button>
