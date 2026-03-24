@@ -18,7 +18,6 @@ interface TellerFetchResult {
 }
 
 function getCerts() {
-  // Try to read from environment variables (Vercel)
   const certB64 = process.env.TELLER_CERT_B64;
   const keyB64 = process.env.TELLER_KEY_B64;
   
@@ -29,7 +28,6 @@ function getCerts() {
     };
   }
   
-  // Fallback to local files (development)
   const certPath = path.join(process.cwd(), 'certificate.pem');
   const keyPath = path.join(process.cwd(), 'private_key.pem');
   
@@ -60,7 +58,7 @@ function tellerFetch(url: string, options: RequestInit = {}): Promise<TellerFetc
       cert: certs.cert,
       key: certs.key,
       headers: {
-        'Authorization': `Bearer ${TELLER_APP_ID}`,
+        'Authorization': 'Basic ' + Buffer.from(`${TELLER_APP_ID}:`).toString('base64'),
         'Content-Type': 'application/json',
       },
     };

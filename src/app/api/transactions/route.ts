@@ -52,7 +52,7 @@ function tellerFetch(url: string, options: RequestInit = {}): Promise<TellerFetc
       cert: certs.cert,
       key: certs.key,
       headers: {
-        'Authorization': `Bearer ${TELLER_APP_ID}`,
+        'Authorization': 'Basic ' + Buffer.from(`${TELLER_APP_ID}:`).toString('base64'),
         'Content-Type': 'application/json',
       },
     };
