@@ -24,12 +24,35 @@ interface TellerFetchResult {
   status: number;
 }
 
+function getCerts() {
+  const certB64 = process.env.TELLER_CERT_B64;
+  const keyB64 = process.env.TELLER_KEY_B64;
+  
+  if (certB64 && keyB64) {
+    return {
+      cert: Buffer.from(certB64, 'base64'),
+      key: Buffer.from(keyB64, 'base64'),
+    };
+  }
+  
+  const certPath = path.join(process.cwd(), 'certificate.pem');
+  const keyPath = path.join(process.cwd(), 'private_key.pem');
+  
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    return {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+  }
+  
+  return null;
+}
+
 function tellerFetch(url: string, options: RequestInit = {}): Promise<TellerFetchResult> {
   return new Promise((resolve, reject) => {
-    const certPath = path.join(process.cwd(), 'certificate.pem');
-    const keyPath = path.join(process.cwd(), 'private_key.pem');
+    const certs = getCerts();
     
-    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+    if (!certs) {
       reject(new Error('Teller certificates not found'));
       return;
     }
@@ -39,8 +62,8 @@ function tellerFetch(url: string, options: RequestInit = {}): Promise<TellerFetc
       hostname: urlObj.hostname,
       path: urlObj.pathname + urlObj.search,
       method: options.method || 'GET',
-      cert: fs.readFileSync(certPath),
-      key: fs.readFileSync(keyPath),
+      cert: certs.cert,
+      key: certs.key,
       headers: {
         'Authorization': `Bearer ${TELLER_APP_ID}`,
         'Content-Type': 'application/json',
