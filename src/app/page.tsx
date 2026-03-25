@@ -128,12 +128,13 @@ export default function Home() {
         const spendingMap: Record<string, number> = {};
         
         (txData.transactions || []).forEach((tx: Transaction) => {
-          if (tx.amount > 0) {
-            spendingTotal += tx.amount;
+          const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
+          if (amount > 0) {
+            spendingTotal += amount;
             const category = tx.category?.[0] || 'Other';
-            spendingMap[category] = (spendingMap[category] || 0) + tx.amount;
+            spendingMap[category] = (spendingMap[category] || 0) + amount;
           } else {
-            incomeTotal += Math.abs(tx.amount);
+            incomeTotal += Math.abs(amount);
           }
         });
         
@@ -144,7 +145,7 @@ export default function Home() {
         const spendingData: SpendingCategory[] = Object.entries(spendingMap)
           .map(([category, amount], index) => ({
             category,
-            amount,
+            amount: amount,
             color: COLORS[index % COLORS.length],
             icon: CATEGORY_ICONS[category] || '📦',
           }))
@@ -421,18 +422,20 @@ export default function Home() {
               </div>
               
               <div className="space-y-1">
-                {(showTransactions ? transactions : transactions.slice(0, 5)).map((tx) => (
+                {(showTransactions ? transactions : transactions.slice(0, 5)).map((tx) => {
+                const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
+                return (
                   <div
                     key={tx.id}
                     className="flex items-center justify-between py-3 px-2 -mx-2 rounded-xl hover:bg-gray-50 transition-colors"
                   >
                     <div className="flex items-center gap-3">
                       <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
-                        tx.amount > 0 
+                        amount > 0 
                           ? 'bg-red-100 text-red-500' 
                           : 'bg-emerald-100 text-emerald-500'
                       }`}>
-                        <span className="text-lg">{tx.amount > 0 ? '↑' : '↓'}</span>
+                        <span className="text-lg">{amount > 0 ? '↑' : '↓'}</span>
                       </div>
                       <div>
                         <p className="font-medium text-gray-900 text-sm">
@@ -446,11 +449,12 @@ export default function Home() {
                         </p>
                       </div>
                     </div>
-                    <p className={`font-semibold ${tx.amount > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {tx.amount > 0 ? '-' : '+'}{formatCurrency(tx.amount)}
+                    <p className={`font-semibold ${amount > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {amount > 0 ? '-' : '+'}{formatCurrency(amount)}
                     </p>
                   </div>
-                ))}
+                );
+              })}
               </div>
               
               {transactions.length === 0 && (
