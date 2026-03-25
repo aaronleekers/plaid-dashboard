@@ -71,11 +71,8 @@ const SUBSCRIPTION_TEMPLATES = [
   { name: 'Uber Eats', icon: 'U', color: '#06C167', category: 'Food' },
 ];
 
-const DEFAULT_SUBSCRIPTIONS: Subscription[] = [
-  { id: '1', name: 'Netflix', amount: 15.99, category: 'Entertainment', nextDate: '2026-03-28', icon: 'N', color: '#E50914' },
-  { id: '2', name: 'Spotify', amount: 9.99, category: 'Entertainment', nextDate: '2026-03-25', icon: 'S', color: '#1DB954' },
-  { id: '3', name: 'iCloud+', amount: 2.99, category: 'Storage', nextDate: '2026-04-01', icon: 'i', color: '#3395FF' },
-];
+// Auto-detected from bank transactions - will be populated on load
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
 
 function classNames(...classes: (string | boolean | undefined)[]) {
   return classes.filter(Boolean).join(' ');
@@ -107,6 +104,52 @@ export default function Home() {
   const [requestSent, setRequestSent] = useState(false);
 
   const monthlySubscriptionTotal = subscriptions.reduce((sum, sub) => sum + sub.amount, 0);
+
+  // Detect subscriptions from transactions
+  const detectSubscriptions = (txs: Transaction[]) => {
+  const detectSubscriptions = (txs: Transaction[]) => {
+    const detected: Subscription[] = [];
+    const amountMap: Record<string, Transaction[]> = {};
+    
+    // Group transactions by similar amount (within $0.50) and merchant
+    txs.forEach(tx => {
+      const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
+      if (amount > 0) {
+        const key = `${tx.merchant?.name || tx.description?.slice(0, 20)}-${Math.round(amount * 2) / 2}`;
+        if (!amountMap[key]) amountMap[key] = [];
+        amountMap[key].push(tx);
+      }
+    });
+    
+    // Find recurring charges (same amount 2+ times)
+    Object.entries(amountMap).forEach(([key, matches]) => {
+      if (matches.length >= 2) {
+        const tx = matches[0];
+        const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
+        const name = tx.merchant?.name || tx.description?.slice(0, 15) || 'Subscription';
+        
+        // Skip small/one-time charges
+        if (amount < 1) return;
+        
+        const templates = SUBSCRIPTION_TEMPLATES.find(t => 
+          name.toLowerCase().includes(t.name.toLowerCase()) ||
+          t.name.toLowerCase().includes(name.toLowerCase())
+        );
+        
+        detected.push({
+          id: `detected-${key}`,
+          name: templates?.name || name,
+          amount,
+          category: templates?.category || 'Other',
+          nextDate: matches[0].date,
+          icon: templates?.icon || name.charAt(0).toUpperCase(),
+          color: templates?.color || '#666666'
+        });
+      }
+    });
+    
+    return detected.slice(0, 10);
+  };
 
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
@@ -150,6 +193,12 @@ export default function Home() {
         setIncome(monthIncome);
         const spendingData = Object.entries(spendingMap).map(([category, amount]) => ({ category, amount, percentage: (amount / monthSpending) * 100 })).sort((a, b) => b.amount - a.amount).slice(0, 5);
         setSpending(spendingData);
+        
+        // Auto-detect subscriptions from transactions
+        const detectedSubs = detectSubscriptions(recentTx.length > 0 ? recentTx : allTransactions);
+        if (detectedSubs.length > 0) {
+          setSubscriptions(detectedSubs);
+        }
       }
     } catch (err) { console.error('Error:', err); setError('Failed to load data'); }
     setLoading(false);
