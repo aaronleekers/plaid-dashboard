@@ -37,45 +37,24 @@ interface Subscription {
   category: string;
   nextDate: string;
   icon: string;
+  color: string;
 }
 
 interface SpendingCategory {
   category: string;
   amount: number;
-  color: { bg: string; text: string; light: string };
-  icon: string;
+  percentage: number;
 }
 
 type TabType = 'home' | 'activity' | 'cards' | 'settings';
 
-const COLORS: SpendingCategory['color'][] = [
-  { bg: 'bg-gradient-to-br from-emerald-400 to-teal-500', text: 'text-emerald-500', light: 'bg-emerald-100' },
-  { bg: 'bg-gradient-to-br from-blue-400 to-indigo-500', text: 'text-blue-500', light: 'bg-blue-100' },
-  { bg: 'bg-gradient-to-br from-purple-400 to-pink-500', text: 'text-purple-500', light: 'bg-purple-100' },
-  { bg: 'bg-gradient-to-br from-orange-400 to-red-500', text: 'text-orange-500', light: 'bg-orange-100' },
-  { bg: 'bg-gradient-to-br from-cyan-400 to-blue-500', text: 'text-cyan-500', light: 'bg-cyan-100' },
-  { bg: 'bg-gradient-to-br from-rose-400 to-pink-500', text: 'text-rose-500', light: 'bg-rose-100' },
-];
-
-const CATEGORY_ICONS: Record<string, string> = {
-  'Food and Drink': '🍽️',
-  'Travel': '✈️',
-  'Shopping': '🛍️',
-  'Entertainment': '🎬',
-  'Healthcare': '🏥',
-  'Utilities': '💡',
-  'Transportation': '🚗',
-  'Subscriptions': '📱',
-  'Other': '📦',
-};
-
-// Sample subscriptions - in production these would come from the API
+// Subscriptions data
 const SAMPLE_SUBSCRIPTIONS: Subscription[] = [
-  { id: '1', name: 'Netflix', amount: 15.99, category: 'Entertainment', nextDate: '2026-03-28', icon: '🎬' },
-  { id: '2', name: 'Spotify', amount: 9.99, category: 'Entertainment', nextDate: '2026-03-25', icon: '🎵' },
-  { id: '3', name: 'iCloud', amount: 2.99, category: 'Storage', nextDate: '2026-04-01', icon: '☁️' },
-  { id: '4', name: 'Gym Membership', amount: 49.99, category: 'Health', nextDate: '2026-03-30', icon: '💪' },
-  { id: '5', name: 'Amazon Prime', amount: 14.99, category: 'Shopping', nextDate: '2026-04-05', icon: '📦' },
+  { id: '1', name: 'Netflix', amount: 15.99, category: 'Entertainment', nextDate: '2026-03-28', icon: 'N', color: '#E50914' },
+  { id: '2', name: 'Spotify', amount: 9.99, category: 'Entertainment', nextDate: '2026-03-25', icon: 'S', color: '#1DB954' },
+  { id: '3', name: 'iCloud+', amount: 2.99, category: 'Storage', nextDate: '2026-04-01', icon: 'i', color: '#3395FF' },
+  { id: '4', name: 'Planet Fitness', amount: 49.99, category: 'Health', nextDate: '2026-03-30', icon: 'P', color: '#5E2B97' },
+  { id: '5', name: 'Amazon Prime', amount: 14.99, category: 'Shopping', nextDate: '2026-04-05', icon: 'A', color: '#FF9900' },
 ];
 
 function classNames(...classes: (string | boolean | undefined)[]) {
@@ -85,22 +64,21 @@ function classNames(...classes: (string | boolean | undefined)[]) {
 export default function Home() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(SAMPLE_SUBSCRIPTIONS);
+  const [subscriptions] = useState<Subscription[]>(SAMPLE_SUBSCRIPTIONS);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [totalBalance, setTotalBalance] = useState(0);
   const [spending, setSpending] = useState<SpendingCategory[]>([]);
   const [totalSpending, setTotalSpending] = useState(0);
   const [income, setIncome] = useState(0);
-  const [monthlySubscriptionTotal, setMonthlySubscriptionTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [showAllSubs, setShowAllSubs] = useState(false);
+
+  const monthlySubscriptionTotal = subscriptions.reduce((sum, sub) => sum + sub.amount, 0);
 
   useEffect(() => {
     fetchData();
-    // Calculate monthly subscriptions
-    const subTotal = SAMPLE_SUBSCRIPTIONS.reduce((sum, sub) => sum + sub.amount, 0);
-    setMonthlySubscriptionTotal(subTotal);
   }, []);
 
   const fetchData = async (isRefresh = false) => {
@@ -121,23 +99,15 @@ export default function Home() {
       
       // Calculate totals
       let balance = 0;
-      
       (data.accounts || []).forEach((acc: Account) => {
         const ledger = parseFloat(acc.balances?.ledger || acc.balances?.current || '0') || 0;
-        if (acc.type === 'credit') {
-          balance -= Math.abs(ledger);
-        } else {
-          balance += ledger;
-        }
+        if (acc.type === 'credit') balance -= Math.abs(ledger);
+        else balance += ledger;
       });
-      
       setTotalBalance(balance);
       
       // Fetch transactions
-      const primaryAccount = (data.accounts || []).find(
-        (a: Account) => a.type === 'depository'
-      );
-      
+      const primaryAccount = (data.accounts || []).find((a: Account) => a.type === 'depository');
       if (primaryAccount) {
         const txResponse = await fetch('/api/transactions', {
           method: 'POST',
@@ -147,34 +117,22 @@ export default function Home() {
         const txData = await txResponse.json();
         const allTransactions = txData.transactions || [];
         
-        // Filter to this month
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const thisMonthTx = allTransactions.filter((tx: Transaction) => {
-          const txDate = new Date(tx.date);
-          return txDate >= startOfMonth;
-        });
+        // Filter to last 30 days
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const recentTx = allTransactions.filter((tx: Transaction) => new Date(tx.date) >= thirtyDaysAgo);
+        setTransactions(recentTx.length > 0 ? recentTx : allTransactions.slice(0, 30));
         
-        const displayTransactions = thisMonthTx.length > 0 ? thisMonthTx : allTransactions.slice(0, 20);
-        setTransactions(displayTransactions);
-        
-        // Calculate spending & income
+        // Calculate spending
         const spendingMap: Record<string, number> = {};
         let monthSpending = 0;
         let monthIncome = 0;
         
-        const txsToUse = thisMonthTx.length > 0 ? thisMonthTx : allTransactions.filter((tx: Transaction) => {
-          const txDate = new Date(tx.date);
-          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-          return txDate >= thirtyDaysAgo;
-        });
-        
-        txsToUse.forEach((tx: Transaction) => {
+        (recentTx.length > 0 ? recentTx : allTransactions).forEach((tx: Transaction) => {
           const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
           if (amount > 0) {
             monthSpending += amount;
-            const category = tx.category?.[0] || 'Other';
-            spendingMap[category] = (spendingMap[category] || 0) + amount;
+            const cat = tx.category?.[0] || 'Other';
+            spendingMap[cat] = (spendingMap[cat] || 0) + amount;
           } else {
             monthIncome += Math.abs(amount);
           }
@@ -183,17 +141,10 @@ export default function Home() {
         setTotalSpending(monthSpending);
         setIncome(monthIncome);
         
-        // Build spending categories
-        const spendingData: SpendingCategory[] = Object.entries(spendingMap)
-          .map(([category, amount], index) => ({
-            category,
-            amount,
-            color: COLORS[index % COLORS.length],
-            icon: CATEGORY_ICONS[category] || '📦',
-          }))
+        const spendingData = Object.entries(spendingMap)
+          .map(([category, amount]) => ({ category, amount, percentage: (amount / monthSpending) * 100 }))
           .sort((a, b) => b.amount - a.amount)
           .slice(0, 5);
-        
         setSpending(spendingData);
       }
     } catch (err) {
@@ -204,496 +155,393 @@ export default function Home() {
     setRefreshing(false);
   };
 
-  const handleRefresh = () => fetchData(true);
+  const formatCurrency = (amount: number) => 
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Math.abs(amount));
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(Math.abs(amount));
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+  const formatDate = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
     return 'Good evening';
   };
 
-  const netAssets = totalBalance;
+  // Category colors
+  const categoryColors: Record<string, { bg: string; text: string }> = {
+    'Food and Drink': { bg: 'bg-amber-100', text: 'text-amber-600' },
+    'Travel': { bg: 'bg-sky-100', text: 'text-sky-600' },
+    'Shopping': { bg: 'bg-pink-100', text: 'text-pink-600' },
+    'Entertainment': { bg: 'bg-purple-100', text: 'text-purple-600' },
+    'Healthcare': { bg: 'bg-green-100', text: 'text-green-600' },
+    'Utilities': { bg: 'bg-blue-100', text: 'text-blue-600' },
+    'Transportation': { bg: 'bg-orange-100', text: 'text-orange-600' },
+    'Other': { bg: 'bg-gray-100', text: 'text-gray-600' },
+  };
 
-  // Calculate donut chart segments
-  const circumference = 2 * Math.PI * 50;
-  let cumulativePercentage = 0;
-
-  // Render Home Tab
-  const renderHome = () => (
-    <>
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-white rounded-2xl shadow-md p-4">
-          <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center mb-3">
-            <span className="text-lg">💸</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalSpending)}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Spent this month</p>
-        </div>
-        <div className="bg-white rounded-2xl shadow-md p-4">
-          <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center mb-3">
-            <span className="text-lg">💰</span>
-          </div>
-          <p className="text-2xl font-bold text-emerald-600">{formatCurrency(income)}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Income this month</p>
-        </div>
-      </div>
-
-      {/* Spending Breakdown */}
-      {spending.length > 0 && (
-        <div className="bg-white rounded-3xl shadow-md p-5 mb-4">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-bold text-gray-900">Spending Breakdown</h2>
-            <span className="text-xs text-gray-500">{new Date().toLocaleDateString('en-US', { month: 'long' })}</span>
-          </div>
-          
-          <div className="flex items-center gap-5">
-            <div className="relative w-32 h-32 flex-shrink-0">
-              <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="50" stroke="#f3f4f6" strokeWidth="14" fill="none" />
-                {spending.map((item, index) => {
-                  const percentage = (item.amount / totalSpending) * 100;
-                  const dashArray = `${(percentage / 100) * 314.16} 314.16`;
-                  const dashOffset = -cumulativePercentage * 3.1416;
-                  cumulativePercentage += percentage;
-                  const colors = ['#10B981', '#3B82F6', '#8B5CF6', '#F97316', '#EC4899'];
-                  return (
-                    <circle
-                      key={item.category}
-                      cx="60"
-                      cy="60"
-                      r="50"
-                      stroke={colors[index % colors.length]}
-                      strokeWidth="14"
-                      fill="none"
-                      strokeDasharray={dashArray}
-                      strokeDashoffset={dashOffset}
-                      strokeLinecap="round"
-                      className="transition-all duration-500"
-                    />
-                  );
-                })}
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xs text-gray-500">Total</span>
-                <span className="text-lg font-bold text-gray-900">{formatCurrency(totalSpending)}</span>
-              </div>
-            </div>
-            
-            <div className="flex-1 space-y-3">
-              {spending.map((item) => (
-                <div key={item.category} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-8 h-8 rounded-lg ${item.color.bg} flex items-center justify-center`}>
-                      <span className="text-sm">{item.icon}</span>
+  // Render tabs
+  const renderTabContent = () => {
+    if (activeTab === 'activity') {
+      return (
+        <div className="px-4 pt-4">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">All Activity</h2>
+          <div className="space-y-2">
+            {transactions.map((tx) => {
+              const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
+              const isIncome = amount < 0;
+              return (
+                <div key={tx.id} className="bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isIncome ? 'bg-emerald-100' : 'bg-red-50'}`}>
+                      <span className={`text-sm font-semibold ${isIncome ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {isIncome ? '↓' : '↑'}
+                      </span>
                     </div>
-                    <span className="text-sm text-gray-600">{item.category}</span>
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">{tx.merchant?.name || tx.description?.slice(0, 30) || 'Transaction'}</p>
+                      <p className="text-xs text-gray-500">{formatDate(tx.date)} {tx.status === 'pending' && '• Pending'}</p>
+                    </div>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{formatCurrency(item.amount)}</span>
+                  <span className={`font-semibold ${isIncome ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {isIncome ? '+' : '-'}{formatCurrency(amount)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    if (activeTab === 'cards') {
+      const sortedSubs = [...subscriptions].sort((a, b) => new Date(a.nextDate).getTime() - new Date(b.nextDate).getTime());
+      const upcomingSubs = sortedSubs.slice(0, 3);
+      
+      return (
+        <div className="px-4 pt-4 space-y-4">
+          {/* Monthly Summary */}
+          <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-6 text-white">
+            <p className="text-slate-400 text-sm mb-1">Monthly Subscriptions</p>
+            <p className="text-3xl font-bold mb-1">{formatCurrency(monthlySubscriptionTotal)}</p>
+            <p className="text-slate-400 text-sm">{subscriptions.length} active</p>
+          </div>
+
+          {/* Upcoming */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <h3 className="font-semibold text-gray-900 mb-3">Next Payments</h3>
+            <div className="space-y-3">
+              {upcomingSubs.map((sub) => (
+                <div key={sub.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: sub.color }}>
+                      {sub.icon}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">{sub.name}</p>
+                      <p className="text-xs text-gray-500">{formatDate(sub.nextDate)}</p>
+                    </div>
+                  </div>
+                  <span className="font-semibold text-gray-900">{formatCurrency(sub.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* All Subscriptions */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-900">All Subscriptions</h3>
+              <button className="text-sm text-emerald-600 font-medium">+ Add</button>
+            </div>
+            <div className="space-y-3">
+              {subscriptions.map((sub) => (
+                <div key={sub.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: sub.color }}>
+                      {sub.icon}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">{sub.name}</p>
+                      <p className="text-xs text-gray-500">{sub.category}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-gray-900">{formatCurrency(sub.amount)}</p>
+                    <p className="text-xs text-gray-500">/mo</p>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      )}
+      );
+    }
 
-      {/* Subscriptions Preview */}
-      <div className="bg-white rounded-3xl shadow-md p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-gray-900">Subscriptions</h2>
-          <span className="text-xs text-gray-500">{subscriptions.length} active</span>
-        </div>
-        <div className="space-y-3">
-          {subscriptions.slice(0, 3).map((sub) => (
-            <div key={sub.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-lg">
-                  {sub.icon}
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900 text-sm">{sub.name}</p>
-                  <p className="text-xs text-gray-500">Next: {formatDate(sub.nextDate)}</p>
-                </div>
-              </div>
-              <span className="font-semibold text-gray-900">{formatCurrency(sub.amount)}</span>
+    if (activeTab === 'settings') {
+      return (
+        <div className="px-4 pt-4 space-y-4">
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900">Profile</h3>
+              <button className="text-sm text-emerald-600 font-medium">Edit</button>
             </div>
-          ))}
-        </div>
-        <button 
-          onClick={() => setActiveTab('cards')}
-          className="w-full mt-4 py-3 text-center text-emerald-600 font-medium text-sm hover:bg-emerald-50 rounded-xl transition-colors"
-        >
-          View All Subscriptions
-        </button>
-      </div>
-
-      {/* Accounts */}
-      <div className="bg-white rounded-3xl shadow-md p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-gray-900">Accounts</h2>
-          <span className="text-xs text-gray-500">{accounts.length} total</span>
-        </div>
-        <div className="space-y-3">
-          {accounts.map((account) => (
-            <div
-              key={account.id}
-              className="flex items-center justify-between py-2"
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                  account.type === 'depository' 
-                    ? 'bg-gradient-to-br from-emerald-400 to-teal-500'
-                    : 'bg-gradient-to-br from-purple-400 to-pink-500'
-                }`}>
-                  <span className="text-xl">{account.type === 'depository' ? '🏦' : '💳'}</span>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-900 text-sm">{account.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {account.institution?.name} ••••{account.last_four}
-                  </p>
-                </div>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-gradient-to-br from-emerald-400 to-teal-400 rounded-full flex items-center justify-center text-white text-xl font-bold">
+                A
               </div>
-              <div className="text-right">
-                <p className={`font-bold ${account.type === 'credit' ? 'text-red-500' : 'text-gray-900'}`}>
-                  {account.type === 'credit' ? '-' : ''}{formatCurrency(parseFloat(account.balances?.ledger || '0'))}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {parseFloat(account.balances?.available || '0') > 0 && `${formatCurrency(parseFloat(account.balances?.available || '0'))} avail`}
-                </p>
+              <div>
+                <p className="font-semibold text-gray-900">Aaron Leek</p>
+                <p className="text-sm text-gray-500">Connected via Teller</p>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
+          </div>
 
-  // Render Activity Tab
-  const renderActivity = () => (
-    <div className="bg-white rounded-3xl shadow-md p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-bold text-gray-900">Recent Activity</h2>
-        <span className="text-xs text-gray-500">{transactions.length} transactions</span>
-      </div>
-      
-      <div className="space-y-1">
-        {transactions.map((tx) => {
-          const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
-          return (
-            <div
-              key={tx.id}
-              className="flex items-center justify-between py-3 px-2 -mx-2 rounded-xl hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
-                  amount > 0 
-                    ? 'bg-red-100 text-red-500' 
-                    : 'bg-emerald-100 text-emerald-500'
-                }`}>
-                  <span className="text-lg">{amount > 0 ? '↑' : '↓'}</span>
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <h3 className="font-semibold text-gray-900 mb-3">Connected Accounts</h3>
+            <div className="space-y-3">
+              {accounts.map((acc) => (
+                <div key={acc.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-lg">🏦</div>
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">{acc.institution?.name}</p>
+                      <p className="text-xs text-gray-500">••••{acc.last_four}</p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-emerald-600 font-medium">Connected</span>
                 </div>
-                <div>
-                  <p className="font-medium text-gray-900 text-sm">
-                    {tx.merchant?.name || tx.description || 'Transaction'}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {formatDate(tx.date)}
-                    {tx.status === 'pending' && (
-                      <span className="ml-2 text-yellow-600 font-medium">• Pending</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <h3 className="font-semibold text-gray-900 mb-3">Preferences</h3>
+            <div className="space-y-3">
+              {[
+                { icon: '🔔', label: 'Notifications', value: 'On' },
+                { icon: '🔒', label: 'Security', value: 'PIN' },
+                { icon: '🌐', label: 'Currency', value: 'USD' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3">
+                    <span>{item.icon}</span>
+                    <span className="text-gray-700">{item.label}</span>
+                  </div>
+                  <span className="text-gray-500 text-sm">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button 
+            onClick={() => fetchData(true)}
+            className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center justify-between"
+          >
+            <span className="text-gray-700">Refresh Data</span>
+            <span className={refreshing ? 'animate-spin text-emerald-600' : 'text-gray-400'}>↻</span>
+          </button>
+        </div>
+      );
+    }
+
+    // Home Tab
+    return (
+      <div className="px-4 pt-4 space-y-4">
+        {/* Spending Overview */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">This Month</h3>
+            <span className="text-xs text-gray-500">Last 30 days</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="p-4 bg-red-50 rounded-xl">
+              <p className="text-xs text-red-600 mb-1">Spent</p>
+              <p className="text-xl font-bold text-red-600">{formatCurrency(totalSpending)}</p>
+            </div>
+            <div className="p-4 bg-emerald-50 rounded-xl">
+              <p className="text-xs text-emerald-600 mb-1">Income</p>
+              <p className="text-xl font-bold text-emerald-600">{formatCurrency(income)}</p>
+            </div>
+          </div>
+          
+          {spending.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-gray-700">Top Categories</h4>
+              {spending.slice(0, 4).map((cat) => {
+                const colors = categoryColors[cat.category] || categoryColors['Other'];
+                return (
+                  <div key={cat.category}>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="text-gray-700">{cat.category}</span>
+                      <span className="font-medium text-gray-900">{formatCurrency(cat.amount)}</span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                        style={{ width: `${cat.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Accounts */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Accounts</h3>
+            <span className="text-xs text-gray-500">{accounts.length} connected</span>
+          </div>
+          <div className="space-y-3">
+            {accounts.map((acc) => {
+              const balance = parseFloat(acc.balances?.ledger || acc.balances?.current || '0') || 0;
+              const isCredit = acc.type === 'credit';
+              return (
+                <div key={acc.id} className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isCredit ? 'bg-slate-100' : 'bg-emerald-100'}`}>
+                      <span className="text-lg">{isCredit ? '💳' : '🏦'}</span>
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">{acc.name}</p>
+                      <p className="text-xs text-gray-500">{acc.institution?.name} ••••{acc.last_four}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className={`font-semibold ${isCredit ? 'text-red-500' : 'text-gray-900'}`}>
+                      {isCredit ? '-' : ''}{formatCurrency(balance)}
+                    </p>
+                    {parseFloat(acc.balances?.available || '0') > 0 && (
+                      <p className="text-xs text-gray-500">{formatCurrency(parseFloat(acc.balances?.available || '0'))} avail</p>
                     )}
-                  </p>
+                  </div>
                 </div>
-              </div>
-              <p className={`font-semibold ${amount > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                {amount > 0 ? '-' : '+'}{formatCurrency(amount)}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-      
-      {transactions.length === 0 && (
-        <div className="text-center py-12">
-          <span className="text-5xl mb-3 block">📭</span>
-          <p className="text-gray-500">No transactions yet</p>
+              );
+            })}
+          </div>
         </div>
-      )}
-    </div>
-  );
 
-  // Render Cards Tab
-  const renderCards = () => (
-    <>
-      {/* Monthly Summary */}
-      <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl shadow-lg p-6 mb-4 text-white">
-        <p className="text-indigo-200 text-sm mb-1">Monthly Subscriptions</p>
-        <p className="text-3xl font-bold mb-1">{formatCurrency(monthlySubscriptionTotal)}</p>
-        <p className="text-indigo-200 text-xs">{subscriptions.length} active subscriptions</p>
-      </div>
-
-      {/* All Subscriptions */}
-      <div className="bg-white rounded-3xl shadow-md p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-gray-900">All Subscriptions</h2>
-          <button className="text-emerald-600 text-sm font-medium">+ Add New</button>
-        </div>
-        <div className="space-y-4">
-          {subscriptions.map((sub) => (
-            <div key={sub.id} className="flex items-center justify-between pb-4 border-b border-gray-100 last:border-0 last:pb-0">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center text-xl">
-                  {sub.icon}
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-900">{sub.name}</p>
-                  <p className="text-xs text-gray-500 capitalize">{sub.category}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="font-bold text-gray-900">{formatCurrency(sub.amount)}</p>
-                <p className="text-xs text-gray-500">per month</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Upcoming Payments */}
-      <div className="bg-white rounded-3xl shadow-md p-5">
-        <h2 className="font-bold text-gray-900 mb-4">Upcoming Payments</h2>
-        <div className="space-y-3">
-          {[...subscriptions]
-            .sort((a, b) => new Date(a.nextDate).getTime() - new Date(b.nextDate).getTime())
-            .slice(0, 3)
-            .map((sub) => (
+        {/* Subscriptions Preview */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Subscriptions</h3>
+            <button onClick={() => setActiveTab('cards')} className="text-sm text-emerald-600 font-medium">See all</button>
+          </div>
+          <div className="space-y-3">
+            {subscriptions.slice(0, 3).map((sub) => (
               <div key={sub.id} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: sub.color }}>
                     {sub.icon}
                   </div>
                   <div>
                     <p className="font-medium text-gray-900 text-sm">{sub.name}</p>
-                    <p className="text-xs text-gray-500">{formatDate(sub.nextDate)}</p>
+                    <p className="text-xs text-gray-500">Next: {formatDate(sub.nextDate)}</p>
                   </div>
                 </div>
                 <span className="font-semibold text-gray-900">{formatCurrency(sub.amount)}</span>
               </div>
             ))}
-        </div>
-      </div>
-    </>
-  );
-
-  // Render Settings Tab
-  const renderSettings = () => (
-    <div className="space-y-4">
-      <div className="bg-white rounded-3xl shadow-md p-5">
-        <h2 className="font-bold text-gray-900 mb-4">Account</h2>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                👤
-              </div>
-              <div>
-                <p className="font-medium text-gray-900">Aaron Leek</p>
-                <p className="text-xs text-gray-500">Connected via Teller</p>
-              </div>
-            </div>
-            <button className="text-emerald-600 text-sm font-medium">Edit</button>
           </div>
         </div>
       </div>
-
-      <div className="bg-white rounded-3xl shadow-md p-5">
-        <h2 className="font-bold text-gray-900 mb-4">Connected Banks</h2>
-        <div className="space-y-3">
-          {accounts.map((account) => (
-            <div key={account.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
-                  🏦
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900 text-sm">{account.institution?.name}</p>
-                  <p className="text-xs text-gray-500">••••{account.last_four}</p>
-                </div>
-              </div>
-              <span className="text-xs text-emerald-600 font-medium">Connected</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-white rounded-3xl shadow-md p-5">
-        <h2 className="font-bold text-gray-900 mb-4">App Settings</h2>
-        <div className="space-y-3">
-          {[
-            { icon: '🔔', label: 'Notifications', value: 'Enabled' },
-            { icon: '🔒', label: 'Security', value: 'PIN Protected' },
-            { icon: '🌐', label: 'Currency', value: 'USD ($)' },
-          ].map((setting, i) => (
-            <div key={i} className="flex items-center justify-between py-2">
-              <div className="flex items-center gap-3">
-                <span className="text-lg">{setting.icon}</span>
-                <span className="text-gray-900">{setting.label}</span>
-              </div>
-              <span className="text-gray-500 text-sm">{setting.value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <button 
-        onClick={handleRefresh}
-        className="w-full bg-white rounded-3xl shadow-md p-4 flex items-center justify-between"
-      >
-        <div className="flex items-center gap-3">
-          <span className="text-lg">🔄</span>
-          <span className="text-gray-900">Refresh Data</span>
-        </div>
-        {refreshing ? (
-          <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-        ) : (
-          <span className="text-gray-400">→</span>
-        )}
-      </button>
-    </div>
-  );
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-28">
-      {/* Gradient Header */}
-      <div className="bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 px-5 pt-12 pb-24 rounded-b-[2.5rem] shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <div className="absolute bottom-0 left-0 w-40 h-40 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 px-5 pt-14 pb-20">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <p className="text-gray-400 text-sm">{getGreeting()}</p>
+            <h1 className="text-2xl font-bold text-white">Finance</h1>
+          </div>
+          <button 
+            onClick={() => fetchData(true)}
+            className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
+          >
+            <svg className={`w-5 h-5 text-white ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         
-        <div className="relative max-w-md mx-auto">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <p className="text-emerald-100 text-sm">{getGreeting()}</p>
-              <h1 className="text-2xl font-bold text-white mt-0.5">My Finances</h1>
-            </div>
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={handleRefresh}
-                className="w-11 h-11 bg-white/20 backdrop-blur rounded-full flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
-              >
-                <svg className={`w-5 h-5 text-white ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-              <div className="w-11 h-11 bg-white/20 backdrop-blur rounded-full flex items-center justify-center">
-                <span className="text-xl">👤</span>
-              </div>
+        {/* Balance Card */}
+        {accounts.length > 0 && (
+          <div className="bg-white/5 backdrop-blur-xl rounded-3xl p-6 border border-white/10">
+            <p className="text-gray-400 text-sm mb-1">Total Balance</p>
+            <p className={`text-4xl font-bold mb-4 ${totalBalance < 0 ? 'text-red-400' : 'text-white'}`}>
+              {totalBalance < 0 ? '-' : ''}{formatCurrency(totalBalance)}
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 text-xs rounded-full font-medium">
+                {accounts.length} Accounts
+              </span>
+              {monthlySubscriptionTotal > 0 && (
+                <span className="px-2 py-1 bg-white/10 text-gray-300 text-xs rounded-full">
+                  {formatCurrency(monthlySubscriptionTotal)}/mo subs
+                </span>
+              )}
             </div>
           </div>
-          
-          {accounts.length > 0 && (
-            <div className="bg-white/15 backdrop-blur-lg rounded-3xl p-6 border border-white/20">
-              <p className="text-emerald-100 text-sm mb-1">Total Balance</p>
-              <p className={`text-4xl font-bold ${netAssets < 0 ? 'text-red-200' : 'text-white'} mb-1`}>
-                {netAssets < 0 ? '-' : ''}{formatCurrency(netAssets)}
-              </p>
-              <p className="text-emerald-100/80 text-xs">
-                {accounts.length} account{accounts.length !== 1 ? 's' : ''} connected
-              </p>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Main Content */}
-      <main className="max-w-md mx-auto px-5 -mt-20">
+      {/* Content */}
+      <div className="-mt-10 pb-24">
         {error && (
-          <div className="bg-white rounded-2xl shadow-lg p-4 mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-xl">⚠️</span>
-              <span className="text-gray-700 text-sm">{error}</span>
-            </div>
-            <button 
-              onClick={handleRefresh}
-              className="text-emerald-600 font-medium text-sm"
-            >
-              Retry
-            </button>
+          <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between">
+            <span className="text-red-700 text-sm">{error}</span>
+            <button onClick={() => fetchData(true)} className="text-red-600 font-medium text-sm">Retry</button>
           </div>
         )}
 
         {loading ? (
-          <div className="bg-white rounded-3xl shadow-lg p-8 text-center">
-            <div className="w-14 h-14 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-gray-500">Loading your finances...</p>
+          <div className="mx-4 bg-white rounded-2xl p-8 shadow-sm text-center">
+            <div className="w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-gray-500">Loading...</p>
           </div>
         ) : accounts.length === 0 && !error ? (
-          <div className="bg-white rounded-3xl shadow-lg p-8 text-center">
-            <div className="w-24 h-24 bg-gradient-to-br from-emerald-400 to-teal-400 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg">
-              <span className="text-5xl">🏦</span>
+          <div className="mx-4 bg-white rounded-2xl p-8 shadow-sm text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">🏦</span>
             </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Welcome to Your Finance Hub</h2>
-            <p className="text-gray-500 text-sm mb-6 max-w-xs mx-auto">
-              Connect your bank account to see your balances and transactions.
-            </p>
-            <button
-              onClick={handleRefresh}
-              className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-3 px-8 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all active:scale-95"
-            >
-              Connect Bank
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Connect Your Account</h2>
+            <p className="text-gray-500 text-sm mb-4">Link your bank account to get started</p>
+            <button onClick={() => fetchData()} className="bg-gray-900 text-white px-6 py-3 rounded-xl font-medium">
+              Connect
             </button>
           </div>
         ) : (
-          <>
-            {activeTab === 'home' && renderHome()}
-            {activeTab === 'activity' && renderActivity()}
-            {activeTab === 'cards' && renderCards()}
-            {activeTab === 'settings' && renderSettings()}
-          </>
+          renderTabContent()
         )}
-      </main>
+      </div>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 rounded-t-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+      {/* Bottom Nav */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 z-50">
         <div className="max-w-md mx-auto flex justify-around">
           {[
             { icon: '🏠', label: 'Home', tab: 'home' as TabType },
             { icon: '📊', label: 'Activity', tab: 'activity' as TabType },
             { icon: '💳', label: 'Cards', tab: 'cards' as TabType },
             { icon: '⚙️', label: 'Settings', tab: 'settings' as TabType },
-          ].map((item) => (
-            <button 
-              key={item.tab}
-              onClick={() => setActiveTab(item.tab)}
+          ].map(({ icon, label, tab }) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
               className={classNames(
-                'flex flex-col items-center py-2 px-4 rounded-2xl transition-all',
-                activeTab === item.tab 
+                'flex flex-col items-center py-2 px-4 rounded-xl transition-all',
+                activeTab === tab 
                   ? 'text-emerald-600 bg-emerald-50' 
-                  : 'text-gray-400 hover:text-gray-600'
+                  : 'text-gray-400'
               )}
             >
-              <span className="text-2xl mb-0.5">{item.icon}</span>
-              <span className={classNames(
-                'text-xs',
-                activeTab === item.tab ? 'font-semibold' : ''
-              )}>
-                {item.label}
-              </span>
+              <span className="text-xl mb-0.5">{icon}</span>
+              <span className={classNames('text-xs', activeTab === tab && 'font-semibold')}>{label}</span>
             </button>
           ))}
         </div>
