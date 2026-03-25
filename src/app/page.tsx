@@ -193,14 +193,15 @@ export default function Home() {
         setIncome(monthIncome);
         const spendingData = Object.entries(spendingMap).map(([category, amount]) => ({ category, amount, percentage: (amount / monthSpending) * 100 })).sort((a, b) => b.amount - a.amount).slice(0, 5);
         setSpending(spendingData);
-        
-        // Auto-detect subscriptions from transactions
         const detectedSubs = detectSubscriptions(recentTx.length > 0 ? recentTx : allTransactions);
         if (detectedSubs.length > 0) {
           setSubscriptions(detectedSubs);
         }
       }
-    } catch (err) { console.error('Error:', err); setError('Failed to load data'); }
+    } catch (err) { 
+      console.error('Error:', err); 
+      setError('Failed to load data'); 
+    }
     setLoading(false);
     setRefreshing(false);
   };

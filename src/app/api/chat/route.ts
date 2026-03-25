@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(request: NextRequest) {
+export async function POST(request) {
   try {
     const { message, context } = await request.json();
 
@@ -11,33 +11,16 @@ export async function POST(request: NextRequest) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     
     if (!apiKey) {
-      return NextResponse.json({ response: getRuleBasedResponse(message, context), source: 'rules' });
+      return NextResponse.json({ response: 'AI not configured', source: 'rules' });
     }
 
-    const systemPrompt = `You are a helpful finance assistant. The user is asking about their personal finances. Here's their current financial data:
-
-ACCOUNTS:
-${context.accounts.map((a: any) => `- ${a.name} (${a.institution}): Balance $${a.balance}`).join('\n')}
-
-TOTAL BALANCE: $${context.totalBalance}
-
-SPENDING THIS MONTH: $${context.monthlySpending}
-INCOME THIS MONTH: $${context.monthlyIncome}
-
-SUBSCRIPTIONS:
-${context.subscriptions.map((s: any) => `- ${s.name}: $${s.amount}/month`).join('\n')}
-Total: $${context.subscriptionTotal}
-
-Guidelines:
-- Be conversational and helpful
-- Answer questions concisely (1-3 sentences)
-- If you don't know something, say so`;
+    const systemPrompt = 'You are a helpful finance assistant. Answer concisely.';
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': 'Bearer ' + apiKey,
       },
       body: JSON.stringify({
         model: 'openrouter/auto',
@@ -51,38 +34,16 @@ Guidelines:
     });
 
     if (!response.ok) {
-      return NextResponse.json({ response: getRuleBasedResponse(message, context), source: 'rules' });
+      return NextResponse.json({ response: 'AI error', source: 'error' });
     }
 
     const data = await response.json();
-    const aiResponse = data.choices?.[0]?.message?.content?.trim() || getRuleBasedResponse(message, context);
+    const aiResponse = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content.trim() : 'No response';
 
     return NextResponse.json({ response: aiResponse, source: 'ai' });
 
   } catch (error) {
     console.error('Chat error:', error);
-    return NextResponse.json({ response: 'Sorry, I encountered an error.', source: 'error' }, { status: 500 });
+    return NextResponse.json({ response: 'Error occurred', source: 'error' }, { status: 500 });
   }
-}
-
-function getRuleBasedResponse(message: string, context: any): string {
-  const m = message.toLowerCase();
-  
-  if (m.includes('how much') && (m.includes('spend') || m.includes('spent'))) {
-    return `You've spent $${context.monthlySpending.toFixed(2)} this month.`;
-  }
-  if (m.includes('balance')) {
-    return `Your total balance is $${context.totalBalance.toFixed(2)}.`;
-  }
-  if (m.includes('subscription')) {
-    return `You have ${context.subscriptions.length} subscriptions totaling $${context.subscriptionTotal.toFixed(2)} per month.`;
-  }
-  if (m.includes('income') || m.includes('make') || m.includes('earned')) {
-    return `You've received $${context.monthlyIncome.toFixed(2)} in income this month.`;
-  }
-  if (m.includes('account')) {
-    return `You have ${context.accounts.length} connected accounts.`;
-  }
-  
-  return `You have a balance of $${context.totalBalance.toFixed(2)}, spent $${context.monthlySpending.toFixed(2)} this month, and have ${context.subscriptions.length} subscriptions.`;
 }
