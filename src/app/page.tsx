@@ -122,30 +122,49 @@ export default function Home() {
           body: JSON.stringify({ account_id: primaryAccount.id }),
         });
         const txData = await txResponse.json();
-        setTransactions(txData.transactions || []);
+        const allTransactions = txData.transactions || [];
         
-        // Calculate spending & income
+        // Filter to this month only
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const thisMonthTx = allTransactions.filter((tx: Transaction) => {
+          const txDate = new Date(tx.date);
+          return txDate >= startOfMonth;
+        });
+        
+        const displayTransactions = thisMonthTx.length > 0 ? thisMonthTx : allTransactions.slice(0, 20);
+        setTransactions(displayTransactions);
+        
+        // Calculate spending & income for THIS MONTH or last 30 days
         const spendingMap: Record<string, number> = {};
+        let monthSpending = 0;
+        let monthIncome = 0;
         
-        (txData.transactions || []).forEach((tx: Transaction) => {
+        const txsToUse = thisMonthTx.length > 0 ? thisMonthTx : allTransactions.filter((tx: Transaction) => {
+          const txDate = new Date(tx.date);
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          return txDate >= thirtyDaysAgo;
+        });
+        
+        txsToUse.forEach((tx: Transaction) => {
           const amount = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
           if (amount > 0) {
-            spendingTotal += amount;
+            monthSpending += amount;
             const category = tx.category?.[0] || 'Other';
             spendingMap[category] = (spendingMap[category] || 0) + amount;
           } else {
-            incomeTotal += Math.abs(amount);
+            monthIncome += Math.abs(amount);
           }
         });
         
-        setTotalSpending(spendingTotal);
-        setIncome(incomeTotal);
+        setTotalSpending(monthSpending);
+        setIncome(monthIncome);
         
         // Build spending categories
         const spendingData: SpendingCategory[] = Object.entries(spendingMap)
           .map(([category, amount], index) => ({
             category,
-            amount: amount,
+            amount,
             color: COLORS[index % COLORS.length],
             icon: CATEGORY_ICONS[category] || '📦',
           }))
